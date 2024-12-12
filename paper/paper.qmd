@@ -1,0 +1,1587 @@
+---
+title: "Predicting Alzheimer's Disease Risk Based on Demographic, Lifestyle, and Health Determinants"
+author: 
+  - Dingshuo Li 1007934844
+  - Tianjin Duan 1008062383
+  - Qiduo He 1008374037
+date: today
+date-format: long
+format: pdf
+number-sections: true
+bibliography: references.bib
+---
+
+\begin{center}
+\begin{tabular}{|l|l|}
+\hline
+\textbf{Course:} & STA314 \\ \hline
+\textbf{Group Number:} & 86 \\ \hline
+\textbf{Dataset Chosen:} & Classification of Alzheimer's Disease \\ \hline
+\textbf{Kaggle Team Name:} & Group 86 \\ \hline
+\textbf{Kaggle Ranking:} & 90 \\ \hline
+\textbf{Kaggle Score:} & 0.91346 \\ \hline
+\end{tabular}
+\end{center}
+
+
+```{r setup, include=FALSE}
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# Check and install randomForest or ranger as fallback
+if (!requireNamespace("randomForest", quietly = TRUE)) {
+  install.packages("randomForest", type = "binary") # Try binary installation
+  library(randomForest)
+} else if (!requireNamespace("ranger", quietly = TRUE)) {
+  install.packages("ranger")
+  library(ranger)
+}
+```
+```{r}
+#| include: false
+#| warning: false
+#| message: false
+
+library(xgboost)
+library(corrplot)
+library(lightgbm)
+library(ipred)
+library(rpart)
+library(rpart.plot)
+library(tidyverse)
+library(palmerpenguins)
+library(glmnet)
+library(knitr)
+library(caret)
+library(pROC)
+library(randomForest)
+library(mgcv)
+library(car)
+library(kableExtra)
+```
+
+
+
+```{r}
+#| include: false
+#| warning: false
+#| message: false
+
+data_train <- read_csv(here::here("data/01-raw_data/train.csv"))
+```
+
+
+
+```{r}
+#| include: false
+#| warning: false
+#| message: false
+model <- glm(Diagnosis ~ Age + Gender + Ethnicity + EducationLevel + Smoking + AlcoholConsumption + PhysicalActivity + DietQuality + SleepQuality + BMI + Hypertension + SystolicBP + DiastolicBP + CholesterolTotal +CholesterolLDL + CholesterolHDL + CholesterolTriglycerides + Diabetes + CardiovascularDisease + FamilyHistoryAlzheimers +HeadInjury + Depression + MMSE + MemoryComplaints + BehavioralProblems +Confusion + Disorientation + PersonalityChanges + DifficultyCompletingTasks + Forgetfulness,family=binomial, data = data_train)
+```
+
+```{r}
+#| include: false
+#| warning: false
+#| message: false
+stepwise_model <- step(model,direction ="both",trace =0)
+```
+
+```{r}
+#| include: false
+#| warning: false
+#| message: false
+# Stepwise model selection based on AIC
+model1 <- glm(Diagnosis ~ SleepQuality + Hypertension + Diabetes + 
+    CardiovascularDisease + MMSE + MemoryComplaints + BehavioralProblems, 
+    family = binomial, data = data_train)
+
+stepwise_model <- step(model, direction = "both", trace = 0)
+```
+
+```{r, warning=FALSE}
+#| include: false
+#| warning: false
+#| message: false
+# Lasso regression (L1 regularization)
+library(glmnet)
+
+# Prepare data for glmnet (predictors and response)
+X <- data_train[, -which(names(data_train) == "Diagnosis")]
+y <- data_train$Diagnosis
+
+# Fit Lasso model (alpha = 1 for Lasso)
+lasso_model <- glmnet(as.matrix(X), y, alpha = 1, family = "binomial")
+
+# Plot the Lasso path
+plot(lasso_model, xvar = "lambda", label = TRUE)
+
+# Choose the best lambda via cross-validation
+cv_lasso <- cv.glmnet(as.matrix(X), y, alpha = 1, family = "binomial")
+plot(cv_lasso)
+
+# Fit the model with the best lambda
+best_lambda <- cv_lasso$lambda.min
+lasso_best_model <- glmnet(as.matrix(X), y, alpha = 1, lambda = best_lambda, family = "binomial")
+
+# Coefficients of the selected features
+coef(lasso_best_model)
+
+```
+
+
+
+```{r}
+#| include: false
+#| warning: false
+#| message: false
+# Ridge regression (L2 regularization)
+
+# Fit Ridge model (alpha = 0 for Ridge)
+ridge_model <- glmnet(as.matrix(X), y, alpha = 0, family = "binomial")
+
+# Plot the Ridge path
+plot(ridge_model, xvar = "lambda", label = TRUE)
+
+# Choose the best lambda via cross-validation
+cv_ridge <- cv.glmnet(as.matrix(X), y, alpha = 0, family = "binomial")
+plot(cv_ridge)
+
+# Fit the model with the best lambda
+best_lambda_ridge <- cv_ridge$lambda.min
+ridge_best_model <- glmnet(as.matrix(X), y, alpha = 0, lambda = best_lambda_ridge, family = "binomial")
+
+# Coefficients of the selected features
+coef(ridge_best_model)
+```
+
+```{r}
+#| include: false
+#| warning: false
+#| message: false
+library(car)
+vif(model)
+```
+
+
+
+```{r}
+#| include: false
+#| warning: false
+#| message: false
+# Based on the significant p-values, pick the predictors to fit model2
+
+# Logistic regression model with reduced set of features
+model2 <- glm(Diagnosis ~ SleepQuality + MMSE + MemoryComplaints + BehavioralProblems, 
+              data = data_train, family = binomial)
+
+
+```
+
+```{r}
+#| include: false
+#| warning: false
+#| message: false
+# Load necessary libraries
+library(tidyverse)
+library(caret)
+library(pROC)
+
+
+# Fit Logistic Regression Model 3
+model3 <- glm(Diagnosis ~ Smoking + SleepQuality + CardiovascularDisease +
+                         Hypertension + CholesterolTriglycerides + MMSE +
+                         FunctionalAssessment + MemoryComplaints +
+                         BehavioralProblems + ADL, data = data_train, family = binomial)
+
+
+```
+
+
+
+```{r}
+#| include: false
+#| warning: false
+#| message: false
+
+ridge_predictors <- c(
+  "Age", "Gender", "Ethnicity", "EducationLevel", "BMI", "Smoking",
+  "AlcoholConsumption", "PhysicalActivity", "DietQuality", "SleepQuality",
+  "FamilyHistoryAlzheimers", "CardiovascularDisease", "Diabetes", "Depression",
+  "HeadInjury", "Hypertension", "SystolicBP", "DiastolicBP", "CholesterolTotal",
+  "CholesterolLDL", "CholesterolHDL", "CholesterolTriglycerides", "MMSE",
+  "FunctionalAssessment", "MemoryComplaints", "BehavioralProblems", "ADL",
+  "Confusion", "Disorientation", "PersonalityChanges", 
+  "DifficultyCompletingTasks", "Forgetfulness"
+)
+
+# Build Model4: Logistic Regression with Ridge-selected predictors
+model4 <- glm(Diagnosis ~ ., data = data_train[, c(ridge_predictors, "Diagnosis")], family = binomial)
+
+```
+
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+
+
+# Define training control for K-fold Cross-Validation
+train_control <- trainControl(
+  method = "cv",
+  number = 10,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary
+)
+
+# Ensure Diagnosis is a factor and rename levels
+data_train$Diagnosis <- as.factor(data_train$Diagnosis)
+levels(data_train$Diagnosis) <- c("No", "Yes")  # Rename levels to "No" and "Yes"
+
+
+# Model 1: Full Set of Predictors
+set.seed(123)
+cv_model1 <- train(Diagnosis ~ Age + Gender + Ethnicity + EducationLevel + Smoking + 
+               AlcoholConsumption + PhysicalActivity + DietQuality + SleepQuality +
+               BMI + Hypertension + SystolicBP + DiastolicBP + CholesterolTotal + 
+               CholesterolLDL + CholesterolHDL + CholesterolTriglycerides + 
+               Diabetes + CardiovascularDisease + FamilyHistoryAlzheimers + 
+               HeadInjury + Depression + MMSE + MemoryComplaints + BehavioralProblems + 
+               Confusion + Disorientation + PersonalityChanges + DifficultyCompletingTasks + 
+               Forgetfulness,  data = data_train,
+  method = "glm",
+  family = "binomial",
+  trControl = train_control,
+  metric = "ROC"
+)
+
+# Model 2: Reduced Logistic Model (Hypothesis-based)
+set.seed(123)
+cv_model2 <- train(
+  Diagnosis ~ SleepQuality + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "glm",
+  family = "binomial",
+  trControl = train_control,
+  metric = "ROC"
+)
+
+# Model 3: LASSO-Selected Predictors
+set.seed(123)
+cv_model3 <- train(
+  Diagnosis ~ Smoking + SleepQuality + CardiovascularDisease +
+    Hypertension + CholesterolTriglycerides + MMSE +
+    FunctionalAssessment + MemoryComplaints +
+    BehavioralProblems + ADL,
+  data = data_train,
+  method = "glm",
+  family = "binomial",
+  trControl = train_control,
+  metric = "ROC"
+)
+
+# Model 4: Ridge-Selected Predictors
+set.seed(123)
+cv_model4 <- train(
+  Diagnosis ~ Age + Gender + Ethnicity + EducationLevel + BMI + Smoking +
+    AlcoholConsumption + PhysicalActivity + DietQuality + SleepQuality +
+    FamilyHistoryAlzheimers + CardiovascularDisease + Diabetes + Depression +
+    HeadInjury + Hypertension + SystolicBP + DiastolicBP + CholesterolTotal +
+    CholesterolLDL + CholesterolHDL + CholesterolTriglycerides + MMSE +
+    FunctionalAssessment + MemoryComplaints + BehavioralProblems + ADL +
+    Confusion + Disorientation + PersonalityChanges + DifficultyCompletingTasks +
+    Forgetfulness,
+  data = data_train,
+  method = "glm",
+  family = "binomial",
+  trControl = train_control,
+  metric = "ROC"
+)
+
+# Compare Model Performance
+results <- resamples(list(
+  Model1_Full = cv_model1,
+  Model2_Reduced = cv_model2,
+  Model3_LASSO = cv_model3,
+  Model4_Ridge = cv_model4
+))
+
+
+```
+
+\newpage
+# Introduction 
+Alzheimer’s is a condition characterized by a progressive decline in memory, thinking, behaviour and the ability to perform daily activities @alzheimersdisease. It accounts for 60-80% of dementia cases and mainly affecting individuals aged 65 and older @ncbi_alzheimers. While it does not directly cause death, it greatly increases the likelihood of other complications which ultimately lead to the patient's death. As the disease progresses, it eventually leading to the death of brain cells and leaving the patient unable to care for themselves. Among the early symptoms, memory loss and amnesia often go unnoticed @alzheimersdisease. Currently, there is no cure for Alzheimer's disease and early symptoms are often not apparent, leading to missed opportunities for timely intervention @alzheimersdisease. As the global population ages, Alzheimer's disease has become a serious public health challenge that not only affects individuals and families, but also puts pressure on health care systems worldwide. 
+
+## Problem Statement
+Early diagnosis is crucial as it allows for interventions that can slow the progression of the disease and improve the quality of patient's life. This purpose of this project addresses the specific research question: What demographic, lifestyle, and health characteristics are most strongly related to the risk of leading Alzheimer's Disease? How can we develop a reliable predictive model to assist in its early diagnosis? By analyzing large amounts of Alzheimer's data and utilizing machine learning techniques, our research aims to identify key risk factors and build a predictive model to help healthcare professionals detect Alzheimer's disease early. Ultimately, the project aims to bridge the gap between early detection and effective management, highlighting the potential of approaches to address pressing public health challenges.
+
+
+
+# Data {#sec-data}
+The dataset we used was sourced from @kaggle_alzheimers. The data was divided into two groups approximately 70% of which 1504 rows were used for training and the rest 30% were used for testing. This way we ensure sufficient data for our model development and evaluation. The numerical variable contains mixed variables such as Age, BMI, Alcohol Consumption, Physical Activity, Diet Quality, and Sleep Quality. Categorical variables presented as 1 for yes and 0 for no, it included Gender, Smoking, Memory Complaints Family History of Alzheimers and Diagnosis etc. 
+
+
+## EDA
+In order to better understand the dataset, we performed an exploratory data analysis at the very beginning. First, all the missing values were checked, then we checked the structure and distribution of the dataset. Summary statistics revealed differences between key numerical variables, such as lower MMSE and being strongly associated with an Alzheimer's diagnosis. Correlation analysis in @fig-corr further revealed relationships between variables. The detailed EDA is in [Appendix-@sec-eda].
+```{r}
+#| eval: true
+#| label: fig-corr
+#| fig-cap: Correlation matrix showing pairwise relationships between variables, with blue indicating positive and red indicating negative correlations.
+#| echo: false
+#| warning: false
+#| message: false
+
+par(mar = c(1, 1, 1, 1))
+numeric_data <- data_train[, sapply(data_train, is.numeric)]
+corr_matrix <- cor(numeric_data, use = "complete.obs")
+corrplot(corr_matrix, method = "circle", tl.cex = 0.6, tl.srt = 70, tl.col = "black")
+```
+
+
+# Parametric Modelling
+Given the binary nature of the response variable Diagnosis no Alzheimer's disease = 0 and Alzheimer's disease = 1, we assumed logistic regression as the starting model. Logistic regression is a well-suited and interpretable method for binary classification problems. The initial model includes all potential predictors identified through exploratory data analysis, which helps to provide insight into the relationships and distributions of key variables.
+
+To refine the set of predictors, we used a stepwise selection method. This method systematically adds or removes variables to optimize the model complexity. The resulting model 1 [Appendix-@sec-stepwise] retains key predictors that are considered to be significant predictors of Alzheimer's disease diagnosis. Based on Model 1, we selected significant hypothesis testing and p-values to further refine the model. Resulting in a reduced logistic regression model [Appendix-@sec-reduced]. Furthermore, we applied Lasso and Ridge regression regularization techniques widely used in machine learning. In addition, Cross-validation is used to determine the optimal regularization parameters.
+
+Lasso model in [Appendix-@sec-L1] penalizes the absolute size of coefficients, shrinking irrelevant ones to zero and producing a sparse model. This produces a sparse model that retains only the most influential predictors, improves interpretability, and focuses on variables that have a greater impact on the outcome. Moreover, Ridge regression modelling [Appendix-@sec-L2] penalizes the squared magnitude of the coefficients, thereby reducing multicollinearity and stabilizing the coefficients without shrinking them to zero. 
+
+## Compare Parametric Models
+
+```{r}
+#| eval: true
+#| label: tbl-compare
+#| tbl-cap: Comparison of Models Based on AIC and BIC and Mean ROC-AUC
+#| echo: false
+#| warning: false
+#| message: false
+#| layout-ncol: 2
+#| fig.pos: '!H'
+
+
+# Create the first table for AIC and BIC
+comparison <- data.frame(
+  Model = c("Model1_Full", "Model2_Reduced", "Model3_LASSO", "Model4_Ridge"),
+  AIC = c(1623.017, 1624.685, 1138.041, 1174.125),
+  BIC = c(1665.544, 1651.264, 1196.516, 1349.549)
+)
+
+
+# Create the second table for Mean ROC-AUC
+roc_comparison <- data.frame(
+  Model = c("Model1_Full", "Model2_Reduced", "Model3_LASSO", "Model4_Ridge"),
+  Mean_ROC = c(0.7468952, 0.7620780, 0.8999466, 0.8950991)
+)
+
+kable(comparison)
+kable(roc_comparison)
+```
+
+From @tbl-compare, the Lasso model has the lowest AIC and BIC values and shows that the Lasso model has the highest average ROC-AUC of about 0.90. Thus, the Lasso logistic regression model identified key predictors for Alzheimer's diagnosis, they are Smoking, Sleep Quality, Cardiovascular Disease, Hypertension, Cholesterol Triglycerides, MMSE, Functional Assessment, Memory Complaints, Behavioral Problems, and ADL. In addition, LASSO is also a better choice here because it is consistent with the sparsity we observed in the data. With this model, we have identified the key variables, which marks the completion of our parametric approach to modeling.
+
+
+
+## Limitation of Parametric Modelling
+
+After identifying the key variables, we tested the assumption of log-odds linearity required by logistic regression details in [Appendix-@sec-check]. By analyzing the residual plot @fig-linear-1, we found strong evidence of nonlinearity in the data, which violates assumption of linear model. We attempted to improve the Lasso model by adding interaction and transformation terms but did not improve linearity as shown by @fig-linear-2. This suggests that the logistic regression model is not suitable for our prediction.
+```{r fig.pos='H'}
+#| label: fig-linear
+#| fig-cap: Check for Linearity
+#| echo: false
+#| warning: false
+#| message: false
+#| layout-ncol: 3
+model_gam <- gam(Diagnosis ~ Smoking + CardiovascularDisease + Hypertension + 
+                     MemoryComplaints + BehavioralProblems +
+                     s(SleepQuality, k = 5) + s(CholesterolTriglycerides, k = 5) +
+                     s(MMSE, k = 10) + s(FunctionalAssessment, k = 5) + s(ADL, k = 5), 
+                 data = data_train, family = binomial)
+
+model3_inter <- glm(
+  Diagnosis ~ Smoking * SleepQuality + CardiovascularDisease * Hypertension +
+               CholesterolTriglycerides + MMSE + MemoryComplaints + 
+               BehavioralProblems + ADL,
+  data = data_train, family = binomial
+)
+
+# Plot 1: Residuals vs Fitted Values for model3
+plot(fitted(model3), residuals(model3, type = "deviance"),
+     xlab = "Fitted Values",
+     ylab = "Deviance Residuals",
+     main = "Model3: Residuals vs Fitted Values",
+     pch = 20, col = "blue")
+abline(h = 0, col = "red", lty = 2)
+
+
+
+# Plot 2: Residuals vs Fitted Values for model3_inter
+plot(fitted(model3_inter), residuals(model3_inter, type = "deviance"),
+     xlab = "Fitted Values",
+     ylab = "Deviance Residuals",
+     main = "Model3_Inter: Residuals vs Fitted",
+     pch = 20, col = "blue")
+abline(h = 0, col = "red", lty = 2)
+
+
+
+# Plot 3: Residuals vs Fitted Values for model_gam
+plot(fitted(model_gam), residuals(model_gam, type = "deviance"),
+     xlab = "Fitted Values",
+     ylab = "Deviance Residuals",
+     main = "Model_GAM: Residuals vs Fitted",
+     pch = 20, col = "blue")
+abline(h = 0, col = "red", lty = 2)
+```
+The Generalized Additive Model were also tested, details in [Appendix-@sec-GAM]. Although it achieved an adjusted R-square of 0.725 and deviance explained 59.7%, when we check the linearity shown in @fig-linear-3, the residual plot shows the assumption of linearity does not hold.
+
+
+# Non-parametric Modelling
+## Decision Tree Modeling
+A decision tree was constructed using the predictors identified by the Lasso model. The goal was to create a model that predicts an Alzheimer's diagnosis by decision rules. The [Appendix-@sec-Tree] shows the details of the modelling. We chose a low complexity parameter cp = 0.001 in order to allow the tree to go deeper and capture more subtle patterns in the data. As the result of cross-validation shows, the mean ROC-AUC for the best cp = 0.0902 was 0.844, with a mean sensitivity of 0.986 and a mean specificity of 0.611. The complexity parameter balances tree complexity and predictive accuracy, ensuring that the model is neither overfitted nor oversimplified.
+
+## Pruned Tree
+Based on the cross-validation results, we selected the optimal complexity parameter cp = 0.10 to construct a pruned decision tree as @fig-pruned. This way we can improve the interpretability of the original decision tree. 
+```{r fig.pos='H'}
+#| label: fig-pruned
+#| fig-cap: Pruned Decision Tree of Top Predictors in Alzheimer's Diagnosis
+#| echo: false
+#| warning: false
+#| message: false
+tree_model <- rpart(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "class",
+  control = rpart.control(cp = 0.01)
+)
+
+# Prune the tree to the optimal cp
+optimal_cp <- tree_model$cptable[which.min(tree_model$cptable[, "xerror"]), "CP"]
+pruned_tree <- prune(tree_model, cp = optimal_cp)
+
+# Visualize the pruned tree
+par(mar = c(1, 1, 1, 1))  # Adjusts the margins: bottom, left, top, right
+rpart.plot(pruned_tree, type = 2, extra = 104, main = "Pruned Decision Tree")
+
+```
+The Pruned Decision Tree shown FunctionalAssessment as the most important predictor,  as well as other key variables such as MMSE, ADL, MemoryComplaints, and BehavioralProblems. The root differentiation was based on functional assessment >= 4.9, demonstrating its importance in identifying of Alzheimer's disease. To ensure robustness, 10 cross-validations were performed to optimize the cp. The details are in [Appendix-@sec-Pruned]. As the result shows, pruned trees showed better accuracy with an average ROC-AUC of 0.958, achieved higher specificity mean: 0.92, and sensitivity remained high with mean: 0.96.
+
+## Random Forest
+The predictors for the initial random forest model were selected based on the predictor in the Lasso logistic regression model which include Smoking, Sleep Quality, Cardiovascular Disease, Hypertension, Cholesterol Triglycerides, MMSE, Functional Assessment, Memory Complaints, Behavioral Problems, and ADL. After analyzing the variable importance scores, second models focused on refining the set of predictors to improve performance. The second random forest model reduced the predictors to the top five most important variables which are Functional Assessment, ADL, MMSE, Memory Complaints and Behavioral Problems. These steps were designed to improve interpretability with maintaining accuracy. The details of modelling are in [Appendix-@sec-RF]. Moreover, we tuned the key parameters, including increasing the number of trees to 1,000 and reducing the minimum node size to 3. However, these adjustments did not result in significant improvements, and the OOB error rate remained same with insignificant changes in performance metrics.
+
+## Bagging
+The bagged model was implemented using 500 bootstrap iterations and the result showed accuracy, sensitivity and specificity 100% on the training set with details in [Appendix-@sec-bag]. While this indicates that the bagged model fits the training data very well, it could also indicate overfitting due to the absence of errors. So we implemented 10-fold cross validation to evaluate the bagging model. The average ROC for the cross validation was 0.9495, demonstrating its predictive power.
+
+## Tuned Random Forest
+The tuned random forest model was used to optimize the performance of the original random forest by testing different hyperparameter values. Specifically, the number of variables considered in each split was adjusted using mtry = 2, 3, 4, 5 and evaluated using 10-fold cross-validation. The results showed that the mtry = 2 model had the highest average ROC-AUC value of 0.9565, indicating that this is the best model prediction for diagnosis of Alzheimer's disease.
+
+### Compare Non-Parametric Models
+```{r fig.pos='H'}
+#| label: fig-compares
+#| fig-cap: Comparison of Mean ROC-AUC Across Models
+#| echo: false
+#| warning: false
+#| message: false
+#| layout-ncol: 2
+
+train_control <- trainControl(
+  method = "cv",
+  number = 10,
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE
+)
+
+set.seed(123)
+dt_cv_model <- train(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "rpart",
+  trControl = train_control,
+  metric = "ROC"
+)
+
+tree_model <- rpart(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "class",
+  control = rpart.control(cp = 0.01)
+)
+
+optimal_cp <- tree_model$cptable[which.min(tree_model$cptable[, "xerror"]), "CP"]
+pruned_tree <- prune(tree_model, cp = optimal_cp)
+
+# Train the pruned tree using caret
+set.seed(123)
+pruned_dt_cv <- train(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "rpart",
+  trControl = train_control,
+  metric = "ROC",
+  tuneGrid = expand.grid(cp = optimal_cp)
+)
+
+# 3. Train the Random Forest Model
+set.seed(123)
+rf_cv_model <- train(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "rf",
+  trControl = train_control,
+  metric = "ROC"
+)
+
+# 4. Combine Resampling Results for All Models
+resamples <- resamples(list(
+  DecisionTree_original = dt_cv_model,
+  DecisionTree_pruned = pruned_dt_cv,
+  RandomForest_original = rf_cv_model
+))
+
+# 5. Plot the Boxplot for ROC-AUC
+bwplot(resamples, metric = "ROC", main = "Comparison of ROC-AUC Across Models")
+
+train_control <- trainControl(
+  method = "cv",        # Cross-validation
+  number = 10,          # Number of folds
+  classProbs = TRUE,    # Calculate class probabilities
+  summaryFunction = twoClassSummary  # Optimize for ROC
+)
+
+set.seed(123)
+bagged_cv <- train(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "treebag",         # Bagging method
+  trControl = train_control,  # Cross-validation setup
+  metric = "ROC"              # Optimize for ROC
+)
+
+tune_grid <- expand.grid(mtry = c(2, 3, 4, 5))
+
+# Train the tuned Random Forest model
+set.seed(123)
+rf_tuned <- train(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "rf",              # Random Forest
+  trControl = train_control,  # Cross-validation setup
+  tuneGrid = tune_grid,       # Hyperparameter grid
+  metric = "ROC",             # Optimize for ROC
+  ntree = 1000                # Increase the number of trees
+)
+
+set.seed(123)
+rf_cv_model <- train(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "rf",              # Random Forest
+  trControl = train_control,  # Cross-validation setup
+  metric = "ROC"              # Optimize for ROC
+)
+
+resampless <- resamples(list(
+  Bagging = bagged_cv,
+  RandomForest_tuned = rf_tuned,
+  RandomForest_original = rf_cv_model
+))
+
+
+# Boxplot to compare ROC
+bwplot(resampless, metric = "ROC", main = "Comparison of ROC-AUC Across Models")
+
+```
+
+The box plot @fig-compares-1 shows that the pruned decision tree achieves very high average ROC-AUC values, but similar to random forests. This makes it well-suited for situations where interpretability is critical. However, random forests perform better in terms of predictive stability, showing less variance in cross-validation folds, making it a better choice when maximizing predictive accuracy is a priority. In addition, using cross-validation on random forests showed that a classification threshold of 0.5 yielded the best performance. With an average accuracy of 98.54%, an average precision of 99.61%, and an average recall of 96.3%, the random forest model achieved robust and accurate predictions for Alzheimer's disease cases.
+
+Tuned random forests slightly improved compare to original random forests in terms of ROC-AUC, sensitivity, and specificity. As @fig-compares-2 shows, the performance of the tuned random forest makes it an ideal model for this situation. Therefore, the final optimal model for this research question is the Tuned Random Forest model with key predictor variables: Functional Assessment, ADL, MMSE, Memory Complaints, and Behavioral Problem.
+
+
+# Results and Conclusion
+This study investigated the demographic, lifestyle and health characteristics most closely associated with Alzheimer's disease and developed predictive models to aid early diagnosis. Through exploratory data analysis, parametric modelling, and non-parametric modelling, we have identified key variables including Functional Assessment, ADL, MMSE, Memory Complaints and Behavioral Problems, the most critical predictors of Alzheimer's disease. The analysis showed that Functional Assessment is the most important determinant of Alzheimer's disease, reflecting its strong correlation with patients' cognitive and functional abilities. These factors provide actionable insights for identifying people at risk for Alzheimer's, emphasizing their importance in clinical assessment and early intervention.
+
+To develop a reliable predictive tool for early Alzheimer's diagnosis, we evaluated multiple models. The Tuned Random Forest is the most robust and accurate model with an average ROC-AUC of 0.9565. By adjusting hyperparameters such as the number of variables considered in each critical splits, the number of trees and other hyperparameters, the predictive stability and accuracy of the model were optimized. The random forest effectively captured the complex interactions and nonlinear relationships between predictors and response variables. These properties make the tuned random forest ideal for prioritizing predictive power and consistency.
+
+On the other hand, the average ROC-AUC of the pruned decision tree was 0.958, which is comparable to that of a random forest, but more advantageous in terms of interpretability. The model has a hierarchical structure that emphasizes the relative importance of predictors, starting with functional assessment, followed by MMSE, ADL, memory complaints, and behavioural problems. The pruning technique reduces the complexity of the model by removing less critical splits, thereby increasing the generalization of the model and avoiding overfitting. Although slightly less stable than random forests, pruning trees provide a transparent framework for decision-making, which makes it particularly valuable in clinical applications where interpretation ability is critical.
+
+This study shows that machine learning techniques, particularly ensemble models like Random Forest, can be effective in identifying key risk factors to support healthcare professionals in the early diagnosis of Alzheimer's disease. Understanding the fact that functional assessment, ADL, MMSE, Memory Complaints, and Behavioural Problems are key factors in Alzheimer's disease can help develop more targeted early detection, intervention, and management strategies. Healthcare providers can prioritize these factors by incorporating them into daily screening, designing more predictive tools and improving diagnostic protocols. Customized intervention plans should focus on cognitive stimulation, behavioural management, and physical exercise, while educational activities and training can increase patient awareness and support. Integrating predictive algorithms into clinical workflows and emphasizing personalized care plans based on these factors can significantly improve early diagnosis, patient outcomes, and quality of life while reducing the burden on caregivers and the healthcare system.
+
+
+
+# Discussion
+
+## Limitation and Future Direction
+This study has several limitations that affect its generalizability and applicability. The dataset used was limited in size and lacked diversity, particularly in terms of demographic and cultural background, which may limit the model to a wider population. Additionally, the lack of longitudinal temporality also limited our ability to analyze the progression of Alzheimer's disease over time, which may affect the temporal reliability of predictions. Finally, nonparametric models are less interpretable than parametric models, and this limitation in interpretability may prevent the model from achieving higher predictive accuracy.
+
+Future research should focus on expanding the datasets, including different populations, and incorporating longitudinal data to improve the temporal accuracy of predictions. We need to actually validate our models in a real word setting as well as integrate these models into diagnostic workflows In addition, research into new predictive variables such as genetic markers or geographic data could further refine the model, which will provide a more reliable and comprehensive tool for early diagnosis of Alzheimer's disease and personalized patient care.
+
+
+
+\newpage
+
+\appendix
+
+# Appendix {-}
+
+
+
+# EDA {#sec-eda}
+```{r}
+# Preview the data: First few and last few rows
+head(data_train)
+tail(data_train)
+
+# Check the structure of the dataset
+str(data_train)
+
+# Summary statistics of the dataset
+summary(data_train)
+
+# Dimensions of the dataset (rows and columns)
+dim(data_train)
+```
+
+## Statistical Summary for Numeric Columns
+```{r}
+# Extract summary statistics for numeric columns
+numeric_summary <- summary(data_train)
+
+# Convert to a data frame for better presentation
+numeric_summary_df <- as.data.frame(as.table(numeric_summary))
+
+# View the result as a table
+numeric_summary_df
+```
+
+## Correlation matrix for numeric columns
+```{r}
+# install.packages("corrplot")
+library(corrplot)
+numeric_data <- data_train[, sapply(data_train, is.numeric)]
+corr_matrix <- cor(numeric_data, use = "complete.obs")
+
+corrplot(corr_matrix, method = "circle", tl.cex = 0.6, tl.srt = 70, tl.col = "black")
+# considering about the univariable data visualization
+```
+
+
+# Stepwise Modelling {#sec-stepwise}
+```{r}
+model <- glm(Diagnosis ~ Age + Gender + Ethnicity + EducationLevel + Smoking + AlcoholConsumption + PhysicalActivity + DietQuality + SleepQuality + BMI + Hypertension + SystolicBP + DiastolicBP + CholesterolTotal +CholesterolLDL + CholesterolHDL + CholesterolTriglycerides + Diabetes + CardiovascularDisease + FamilyHistoryAlzheimers +HeadInjury + Depression + MMSE + MemoryComplaints + BehavioralProblems +Confusion + Disorientation + PersonalityChanges + DifficultyCompletingTasks + Forgetfulness,family=binomial, data = data_train)
+```
+
+```{r}
+stepwise_model <- step(model,direction ="both",trace =0)
+summary(stepwise_model)
+```
+
+```{r}
+# Stepwise model selection based on AIC
+model1 <- glm(Diagnosis ~ SleepQuality + Hypertension + Diabetes + 
+    CardiovascularDisease + MMSE + MemoryComplaints + BehavioralProblems, 
+    family = binomial, data = data_train)
+
+stepwise_model <- step(model, direction = "both", trace = 0)
+summary(stepwise_model)
+```
+
+
+# Lasso {#sec-L1}
+```{r, warning=FALSE}
+# Lasso regression (L1 regularization)
+library(glmnet)
+
+# Prepare data for glmnet (predictors and response)
+X <- data_train[, -which(names(data_train) == "Diagnosis")]
+y <- data_train$Diagnosis
+
+# Fit Lasso model (alpha = 1 for Lasso)
+lasso_model <- glmnet(as.matrix(X), y, alpha = 1, family = "binomial")
+
+# Plot the Lasso path
+plot(lasso_model, xvar = "lambda", label = TRUE)
+
+# Choose the best lambda via cross-validation
+cv_lasso <- cv.glmnet(as.matrix(X), y, alpha = 1, family = "binomial")
+plot(cv_lasso)
+
+# Fit the model with the best lambda
+best_lambda <- cv_lasso$lambda.min
+lasso_best_model <- glmnet(as.matrix(X), y, alpha = 1, lambda = best_lambda, family = "binomial")
+
+# Coefficients of the selected features
+coef(lasso_best_model)
+
+```
+
+
+# Ridge {#sec-L2}
+```{r, warning=FALSE}
+# Ridge regression (L2 regularization)
+
+# Fit Ridge model (alpha = 0 for Ridge)
+ridge_model <- glmnet(as.matrix(X), y, alpha = 0, family = "binomial")
+
+# Plot the Ridge path
+plot(ridge_model, xvar = "lambda", label = TRUE)
+
+# Choose the best lambda via cross-validation
+cv_ridge <- cv.glmnet(as.matrix(X), y, alpha = 0, family = "binomial")
+plot(cv_ridge)
+
+# Fit the model with the best lambda
+best_lambda_ridge <- cv_ridge$lambda.min
+ridge_best_model <- glmnet(as.matrix(X), y, alpha = 0, lambda = best_lambda_ridge, family = "binomial")
+
+# Coefficients of the selected features
+coef(ridge_best_model)
+```
+
+# Cross-Validation (k-Fold Cross-Validation)
+
+
+## VIF to detect multicollinearity
+```{r}
+library(car)
+vif(model)
+```
+
+Interpreting VIF Values:
+VIF < 5: Low multicollinearity, no concern.
+VIF between 5-10: Moderate multicollinearity, consider revising predictors.
+VIF > 10: High multicollinearity, action required.
+
+
+# Model 2 {#sec-reduced}
+## Reduced Logistic Regression Model (Based on Hypothesis test, p-values)
+
+```{r}
+# Based on the significant p-values, pick the predictors to fit model2
+
+# Logistic regression model with reduced set of features
+model2 <- glm(Diagnosis ~ SleepQuality + MMSE + MemoryComplaints + BehavioralProblems, 
+              data = data_train, family = binomial)
+
+# View the summary of the reduced model
+summary(model2)
+```
+
+# Model 3
+
+## Logistic Regression Model Based on Lasso
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(caret)
+library(pROC)
+
+
+# Fit Logistic Regression Model 3
+model3 <- glm(Diagnosis ~ Smoking + SleepQuality + CardiovascularDisease +
+                         Hypertension + CholesterolTriglycerides + MMSE +
+                         FunctionalAssessment + MemoryComplaints +
+                         BehavioralProblems + ADL, data = data_train, family = binomial)
+
+# Summarize Model 3
+summary(model3)
+
+```
+
+
+# Model 4
+## Logistic Regression Model Based on Ridge
+
+```{r}
+
+ridge_predictors <- c(
+  "Age", "Gender", "Ethnicity", "EducationLevel", "BMI", "Smoking",
+  "AlcoholConsumption", "PhysicalActivity", "DietQuality", "SleepQuality",
+  "FamilyHistoryAlzheimers", "CardiovascularDisease", "Diabetes", "Depression",
+  "HeadInjury", "Hypertension", "SystolicBP", "DiastolicBP", "CholesterolTotal",
+  "CholesterolLDL", "CholesterolHDL", "CholesterolTriglycerides", "MMSE",
+  "FunctionalAssessment", "MemoryComplaints", "BehavioralProblems", "ADL",
+  "Confusion", "Disorientation", "PersonalityChanges", 
+  "DifficultyCompletingTasks", "Forgetfulness"
+)
+
+# Build Model4: Logistic Regression with Ridge-selected predictors
+model4 <- glm(Diagnosis ~ ., data = data_train[, c(ridge_predictors, "Diagnosis")], family = binomial)
+
+summary(model4)
+
+```
+
+#Compare models
+## Compare AIC and BIC
+```{r}
+
+# AIC and BIC for Model 1 (Full Model)
+aic_model1 <- AIC(model)
+bic_model1 <- BIC(model)
+
+# AIC and BIC for Model 2 (Reduced Model)
+aic_model2 <- AIC(model2)
+bic_model2 <- BIC(model2)
+
+# AIC and BIC for Model 3 (LASSO-Selected Model)
+aic_model3 <- AIC(model3)
+bic_model3 <- BIC(model3)
+
+# AIC and BIC for Model 4 (Ridge-Selected Model)
+aic_model4 <- AIC(model4)
+bic_model4 <- BIC(model4)
+
+# Combine results into a data frame for comparison
+comparison <- data.frame(
+  Model = c("Model1_Full", "Model2_Reduced", "Model3_LASSO", "Model4_Ridge"),
+  AIC = c(aic_model1, aic_model2, aic_model3, aic_model4),
+  BIC = c(bic_model1, bic_model2, bic_model3, bic_model4)
+)
+
+# Display the comparison
+print(comparison)
+
+```
+
+
+## K-Fold Cross-Validation for each model
+```{r}
+# Load necessary libraries
+library(caret)
+library(pROC)
+
+# Define training control for K-fold Cross-Validation
+train_control <- trainControl(
+  method = "cv",
+  number = 10,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary
+)
+
+# Ensure Diagnosis is a factor and rename levels
+data_train$Diagnosis <- as.factor(data_train$Diagnosis)
+levels(data_train$Diagnosis) <- c("No", "Yes")  # Rename levels to "No" and "Yes"
+
+
+# Model 1: Full Set of Predictors
+set.seed(123)
+cv_model1 <- train(Diagnosis ~ Age + Gender + Ethnicity + EducationLevel + Smoking + 
+               AlcoholConsumption + PhysicalActivity + DietQuality + SleepQuality +
+               BMI + Hypertension + SystolicBP + DiastolicBP + CholesterolTotal + 
+               CholesterolLDL + CholesterolHDL + CholesterolTriglycerides + 
+               Diabetes + CardiovascularDisease + FamilyHistoryAlzheimers + 
+               HeadInjury + Depression + MMSE + MemoryComplaints + BehavioralProblems + 
+               Confusion + Disorientation + PersonalityChanges + DifficultyCompletingTasks + 
+               Forgetfulness,  data = data_train,
+  method = "glm",
+  family = "binomial",
+  trControl = train_control,
+  metric = "ROC"
+)
+
+# Model 2: Reduced Logistic Model (Hypothesis-based)
+set.seed(123)
+cv_model2 <- train(
+  Diagnosis ~ SleepQuality + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "glm",
+  family = "binomial",
+  trControl = train_control,
+  metric = "ROC"
+)
+
+# Model 3: LASSO-Selected Predictors
+set.seed(123)
+cv_model3 <- train(
+  Diagnosis ~ Smoking + SleepQuality + CardiovascularDisease +
+    Hypertension + CholesterolTriglycerides + MMSE +
+    FunctionalAssessment + MemoryComplaints +
+    BehavioralProblems + ADL,
+  data = data_train,
+  method = "glm",
+  family = "binomial",
+  trControl = train_control,
+  metric = "ROC"
+)
+
+# Model 4: Ridge-Selected Predictors
+set.seed(123)
+cv_model4 <- train(
+  Diagnosis ~ Age + Gender + Ethnicity + EducationLevel + BMI + Smoking +
+    AlcoholConsumption + PhysicalActivity + DietQuality + SleepQuality +
+    FamilyHistoryAlzheimers + CardiovascularDisease + Diabetes + Depression +
+    HeadInjury + Hypertension + SystolicBP + DiastolicBP + CholesterolTotal +
+    CholesterolLDL + CholesterolHDL + CholesterolTriglycerides + MMSE +
+    FunctionalAssessment + MemoryComplaints + BehavioralProblems + ADL +
+    Confusion + Disorientation + PersonalityChanges + DifficultyCompletingTasks +
+    Forgetfulness,
+  data = data_train,
+  method = "glm",
+  family = "binomial",
+  trControl = train_control,
+  metric = "ROC"
+)
+
+# Compare Model Performance
+results <- resamples(list(
+  Model1_Full = cv_model1,
+  Model2_Reduced = cv_model2,
+  Model3_LASSO = cv_model3,
+  Model4_Ridge = cv_model4
+))
+
+# Summarize and visualize results
+summary(results)
+bwplot(results, metric = "ROC") # Boxplot for ROC scores
+
+```
+
+
+```{r}
+summary_resamples <- summary(results)
+
+# Access the mean ROC for each model
+mean_roc <- summary_resamples$statistics$ROC[, "Mean"]
+print(mean_roc)
+
+```
+
+
+
+# Checking Linearity of Model3 {#sec-check}
+```{r}
+# Plot residuals vs fitted values for model3
+plot(fitted(model3), residuals(model3, type = "deviance"),
+     xlab = "Fitted Values",
+     ylab = "Deviance Residuals",
+     main = "Residuals vs Fitted Values",
+     pch = 20, col = "blue")
+
+# Add a horizontal line at 0 for reference
+abline(h = 0, col = "red", lty = 2)
+
+
+# Q-Q plot for residuals
+qqnorm(residuals(model3, type = "deviance"))
+qqline(residuals(model3, type = "deviance"), col = "red")
+```
+Residuals vs Fitted Plot: Indicates non-linearity in predictors.
+Q-Q Plot: Suggests approximate normality but highlights potential outliers or heavy-tailed residuals.
+
+
+```{r}
+sapply(data_train[, c("Smoking", "SleepQuality", "CardiovascularDisease", 
+                      "Hypertension", "CholesterolTriglycerides", "MMSE", 
+                      "FunctionalAssessment", "MemoryComplaints", 
+                      "BehavioralProblems", "ADL")], function(x) length(unique(x)))
+
+```
+
+## Try the interaction
+```{r}
+# Add interaction terms
+model3_inter <- glm(
+  Diagnosis ~ Smoking * SleepQuality + CardiovascularDisease * Hypertension +
+               CholesterolTriglycerides + MMSE + MemoryComplaints + 
+               BehavioralProblems + ADL,
+  data = data_train, family = binomial
+)
+
+# View model summary
+summary(model3_inter)
+
+# Plot residuals vs fitted values for model3
+plot(fitted(model3_inter), residuals(model3_inter, type = "deviance"),
+     xlab = "Fitted Values",
+     ylab = "Deviance Residuals",
+     main = "Residuals vs Fitted Values",
+     pch = 20, col = "blue")
+
+# Add a horizontal line at 0 for reference
+abline(h = 0, col = "red", lty = 2)
+
+
+# Q-Q plot for residuals
+qqnorm(residuals(model3_inter, type = "deviance"))
+qqline(residuals(model3_inter, type = "deviance"), col = "red")
+```
+
+
+
+
+# Try the Generalized Additive Model {#sec-GAM}
+```{r}
+library(mgcv)
+# Fit the Generalized Additive Model
+model_gam <- gam(Diagnosis ~ Smoking + CardiovascularDisease + Hypertension + 
+                     MemoryComplaints + BehavioralProblems +
+                     s(SleepQuality, k = 5) + s(CholesterolTriglycerides, k = 5) +
+                     s(MMSE, k = 10) + s(FunctionalAssessment, k = 5) + s(ADL, k = 5), 
+                 data = data_train, family = binomial)
+
+# View the model summary
+summary(model_gam)
+
+# Plot the smooth terms
+par(mfrow = c(2, 3))  # Arrange plots in a grid
+plot(model_gam, se = TRUE, col = "blue")
+
+# Plot the smooth terms to examine the relationships between predictors and diagnosis
+plot(model_gam)
+
+```
+
+```{r}
+aic_model_gam <- AIC(model_gam)
+aic_model_gam
+```
+
+## Check the linearity of GAM
+```{r}
+# Plot residuals vs fitted values for model3
+plot(fitted(model_gam), residuals(model_gam, type = "deviance"),
+     xlab = "Fitted Values",
+     ylab = "Deviance Residuals",
+     main = "Residuals vs Fitted Values",
+     pch = 20, col = "blue")
+
+# Add a horizontal line at 0 for reference
+abline(h = 0, col = "red", lty = 2)
+
+
+# Q-Q plot for residuals
+qqnorm(residuals(model_gam, type = "deviance"))
+qqline(residuals(model_gam, type = "deviance"), col = "red")
+```
+
+
+
+
+
+```{r}
+data_test <- read_csv(here::here("data/01-raw_data/test.csv"))
+```
+
+
+
+# Decision Tree {#sec-Tree}
+## Based on our the predictors of Model 3 (Lasso) selected before
+```{r}
+
+dt_model_lasso <- rpart(
+  Diagnosis ~ Smoking + SleepQuality + CardiovascularDisease +
+    Hypertension + CholesterolTriglycerides + MMSE +
+    FunctionalAssessment + MemoryComplaints +
+    BehavioralProblems + ADL,
+  data = data_train,
+  method = "class",
+  control = rpart.control(cp = 0.001)  # Lower cp for deeper trees
+)
+rpart.plot(dt_model_lasso)
+
+```
+
+
+```{r}
+# Select important variables from Lasso
+importance <- dt_model_lasso$variable.importance
+print(importance[1:5])
+```
+
+
+## Fit a tree model based on importance selected from Lasso
+```{r}
+
+
+# Train Decision Tree
+tree_model <- rpart(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "class",
+  control = rpart.control(cp = 0.01)
+)
+
+# Visualize the Decision Tree
+rpart.plot(tree_model, type = 2, extra = 104, main = "Decision Tree")
+
+```
+
+
+## CV
+```{r}
+# Set up cross-validation control for the Decision Tree
+
+
+# Train the Decision Tree model using caret
+set.seed(123)
+dt_cv_model <- train(Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "rpart",
+  trControl = train_control,
+  metric = "ROC"  # Optimize for ROC-AUC
+)
+
+# Print CV results
+print(dt_cv_model)
+
+```
+
+# Random Forest {#sec-RF}
+
+```{r}
+# Fit a Random Forest Model based on predictors selected by Lasso before
+
+rf_model1 <- randomForest(Diagnosis ~ Smoking + SleepQuality + CardiovascularDisease +
+    Hypertension + CholesterolTriglycerides + MMSE +
+    FunctionalAssessment + MemoryComplaints +
+    BehavioralProblems + ADL,
+    data = data_train, importance = TRUE)
+
+# Variable Importance Plot
+varImpPlot(rf_model1)
+
+# Predictions
+rf_preds <- predict(rf_model1, newdata = data_test)
+```
+
+
+```{r}
+# Take variable importance from Random Forest model 1
+rf_importance <- importance(rf_model1)
+rf_top_predictors <- rownames(rf_importance)[order(-rf_importance[, 1])] # Sort by importance
+
+# Select the top predictors
+rf_selected_predictors <- rf_top_predictors[1:5] # Top 5 predictors
+print(rf_selected_predictors)
+
+```
+
+
+```{r}
+rf_model2 <- randomForest(Diagnosis ~ FunctionalAssessment + ADL + MMSE +
+                         MemoryComplaints + BehavioralProblems,
+                         data = data_train, importance = TRUE)
+
+# Variable Importance Plot
+varImpPlot(rf_model2)
+
+# Predictions
+rf_preds <- predict(rf_model2, newdata = data_test)
+
+```
+
+
+```{r}
+rf_model3 <- randomForest(Diagnosis ~ FunctionalAssessment + ADL + MMSE +
+                         MemoryComplaints,
+                         data = data_train, importance = TRUE)
+
+# Variable Importance Plot
+varImpPlot(rf_model3)
+
+# Predictions
+rf_preds <- predict(rf_model3, newdata = data_test)
+```
+
+
+```{r}
+print(rf_model1)
+print(rf_model2)
+print(rf_model3)
+```
+```{r}
+
+
+# Take variable importance from Random Forest
+rf_importance <- importance(rf_model1)
+rf_top_predictors <- rownames(rf_importance)[order(-rf_importance[, 1])] # Sort by importance
+
+# Select the top predictors for building random forest
+rf_selected_predictors <- rf_top_predictors[1:5] # Top 5 predictors
+print(rf_selected_predictors)
+
+```
+
+
+```{r}
+set.seed(314)
+rf_model_selected <- randomForest(Diagnosis ~ FunctionalAssessment + ADL + MMSE +
+                         MemoryComplaints + BehavioralProblems,
+                         data = data_train, importance = TRUE)
+print(rf_model_selected)
+```
+
+## Adjust some parameters
+```{r}
+set.seed(314)
+rf_model_adjusted <- randomForest(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + 
+    MemoryComplaints + BehavioralProblems,
+  data = data_train, 
+  ntree = 1000, 
+  nodesize= 3,
+  classwt = c(0.7, 0.3),
+  importance = TRUE
+)
+
+print(rf_model_adjusted)
+```
+By adjusting some parameters, there is no outstanding improvement.
+
+
+```{r}
+# Train Random Forest using caret
+set.seed(123)
+rf_cv_model <- train(Diagnosis ~ FunctionalAssessment + ADL + MMSE + 
+    MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "rf",
+  trControl = train_control,
+  metric = "ROC"
+)
+
+# Print CV results for Random Forest
+print(rf_cv_model)
+
+```
+
+
+```{r}
+# Combine the results for comparison
+resamples <- resamples(list(DecisionTree = dt_cv_model, RandomForest = rf_cv_model))
+
+# Summarize the results
+summary(resamples)
+
+# Boxplot to compare performance
+bwplot(resamples, metric = "ROC")
+
+```
+## Prediction of Diagnosis based on Random Forest
+### Explore the Thresholds
+```{r}
+# Threshold
+library(caret)  # For cross-validation
+library(randomForest)  # For Random Forest if additional models are needed
+
+# Number of folds for cross-validation
+k <- 5
+set.seed(42)  # For reproducibility
+
+# Create cross-validation folds
+folds <- createFolds(data_train$Diagnosis, k = k, list = TRUE, returnTrain = TRUE)
+
+# Initialize performance metrics
+accuracy_list <- c()
+precision_list <- c()
+recall_list <- c()
+
+# Perform k-fold cross-validation
+for (i in 1:k) {
+  # Split train and validation sets
+  train_fold <- data_train[folds[[i]], ]
+  valid_fold <- data_train[-folds[[i]], ]
+  
+  # Predict probabilities on validation fold
+  probs <- predict(rf_model_selected, newdata = valid_fold, type = "prob")[, 2]
+  
+  # Apply threshold p = 0.5
+  preds <- ifelse(probs >= 0.5, 1, 0)
+  actual <- valid_fold$Diagnosis
+  
+  # Confusion matrix
+  cm <- table(Predicted = preds, Actual = actual)
+  
+  # Calculate metrics
+  accuracy <- sum(diag(cm)) / sum(cm)
+  precision <- ifelse(sum(preds == 1) > 0, sum(preds == 1 & actual == 1) / sum(preds == 1), NA)
+  recall <- ifelse(sum(actual == 1) > 0, sum(preds == 1 & actual == 1) / sum(actual == 1), NA)
+  
+  # Store metrics
+  accuracy_list <- c(accuracy_list, accuracy)
+  precision_list <- c(precision_list, precision)
+  recall_list <- c(recall_list, recall)
+}
+
+# Aggregate performance metrics
+mean_accuracy <- mean(accuracy_list, na.rm = TRUE)
+mean_precision <- mean(precision_list, na.rm = TRUE)
+mean_recall <- mean(recall_list, na.rm = TRUE)
+
+# Print results
+cat("Cross-Validation Results (p = 0.5):\n")
+cat(paste("Mean Accuracy:", round(mean_accuracy, 4), "\n"))
+cat(paste("Mean Precision:", round(mean_precision, 4), "\n"))
+cat(paste("Mean Recall:", round(mean_recall, 4), "\n"))
+
+f1_score <- 2 * (mean_precision * mean_recall) / (mean_precision + mean_recall)
+print(f1_score) 
+```
+
+It shows that threshold = 0.5 is the best choice.
+
+# Prune trees {#sec-Pruned}
+```{r}
+# Find the optimal cp using cross-validation
+printcp(tree_model)
+
+# Plot the cross-validation error against cp values
+plotcp(tree_model)
+
+# Prune the tree to the optimal cp
+optimal_cp <- tree_model$cptable[which.min(tree_model$cptable[, "xerror"]), "CP"]
+pruned_tree <- prune(tree_model, cp = optimal_cp)
+
+# Visualize the pruned tree
+rpart.plot(pruned_tree, type = 2, extra = 104, main = "Pruned Decision Tree")
+
+```
+
+
+## Validate the Pruned Tree
+```{r}
+# Pruned Decision Tree
+pruned_dt_cv <- train(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "rpart",
+  trControl = train_control,
+  metric = "ROC",
+  tuneGrid = expand.grid(cp = optimal_cp)
+)
+```
+
+
+
+```{r}
+# Collect Resampling Results
+resamples <- resamples(list(
+  DecisionTree_original = dt_cv_model,  # Original Decision Tree
+  DecisionTree_pruned = pruned_dt_cv,  # Pruned Decision Tree
+  RandomForest = rf_cv_model           # Random Forest
+))
+
+# Summary of Results
+summary(resamples)
+
+# Create a Boxplot
+bwplot(resamples, metric = "ROC")  # Boxplot for ROC-AUC
+```
+
+```{r}
+summary_resamples <- summary(resamples)
+
+# Show the mean ROC for each model
+mean_roc <- summary_resamples$statistics$ROC[, "Mean"]
+print(mean_roc)
+```
+
+If interpretability is critical, choose the pruned Decision Tree.
+If predictive performance and stability are more important, choose Random Forest since it shows smaller variability (stability and consistency).
+
+
+```{r}
+print(rf_model1)
+print(rf_model2)
+print(rf_model3)
+```
+
+
+
+
+
+# Prediction for Kaggle Submission
+```{r}
+# Predicted Probability
+test_probabilities <- predict(rf_model1, newdata = data_test, type = "prob")[, 2]
+
+threshold <- 0.5
+binary_predictions <- ifelse(test_probabilities >= threshold, 1, 0)
+
+submission <- data.frame(PatientID = data_test$PatientID, Diagnosis = binary_predictions)
+write_csv(submission, "/Users/dingshuo/Desktop/submission.csv")
+
+
+```
+
+
+
+# Bagging {#sec-bag}
+```{r}
+
+
+# Train a bagged model
+set.seed(123)
+bagged_model <- bagging(
+  Diagnosis ~ .,
+  data = data_train,
+  nbagg = 500
+)
+
+# Predictions
+bagged_preds <- predict(bagged_model, newdata = data_train, type = "class")
+confusionMatrix(bagged_preds, data_train$Diagnosis)
+```
+
+
+
+```{r}
+# Bagging Implementation for Your Data
+set.seed(123)
+
+# Bagging (mtry = Total Number of Predictors)
+bagging_model <- randomForest(
+  Diagnosis ~ ., 
+  data = data_train, 
+  mtry = ncol(data_train) - 1,  # Use all predictors
+  ntree = 500,                 # Number of trees
+  importance = TRUE
+)
+
+# Evaluate Bagging Performance
+bagging_preds <- predict(bagging_model, newdata = data_test, type = "prob")[, 2]
+
+importance_values <- importance(bagging_model)
+top_5_vars <- importance_values[order(-importance_values[, "MeanDecreaseGini"]), ][1:5, ]
+print(top_5_vars)
+
+```
+
+
+```{r}
+# library(caret)
+
+# Define a grid of hyperparameters to test
+tune_grid <- expand.grid(mtry = c(2, 3, 4, 5))
+
+# Perform 10-fold CV with ROC optimization
+set.seed(123)
+rf_tuned <- train(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "rf",
+  trControl = trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary),
+  tuneGrid = tune_grid,
+  metric = "ROC",
+  ntree = 1000  # Increase number of trees
+)
+
+# Print results
+print(rf_tuned$bestTune)
+print(rf_tuned)
+
+```
+
+
+
+```{r}
+bagged_cv <- train(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "treebag",
+  trControl = trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary),
+  metric = "ROC"
+)
+print(bagged_cv)
+
+# Random Forest metrics
+print(rf_tuned)
+```
+
+
+```{r}
+# Combine resampling results
+resamples <- resamples(list(
+  Bagging = bagged_cv,
+  RandomForest_tuned = rf_tuned,
+  RandomForest_before = rf_cv_model
+))
+
+# Summary of results
+summary_resamples <- summary(resamples)
+
+# Boxplot for ROC comparison
+bwplot(resamples, metric = "ROC")
+
+```
+
+```{r}
+# Show the mean ROC for each model
+mean_roc <- summary_resamples$statistics$ROC[, "Mean"]
+print(mean_roc)
+```
+
+
+# Bagging Model & Random Forest Model
+```{r}
+# Train a Bagging model
+set.seed(123)
+bagging_model <- train(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "treebag",  # Method for Bagging
+  trControl = trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary),
+  metric = "ROC"
+)
+
+# Print Bagging results
+print(bagging_model)
+
+# Train a Random Forest model with tuning
+set.seed(123)
+rf_tuned_model <- train(
+  Diagnosis ~ FunctionalAssessment + ADL + MMSE + MemoryComplaints + BehavioralProblems,
+  data = data_train,
+  method = "rf",  # Method for Random Forest
+  trControl = trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary),
+  tuneGrid = expand.grid(mtry = c(2, 3, 4)),
+  metric = "ROC"
+)
+
+# Print Random Forest (tuned) results
+print(rf_tuned_model)
+
+# Collect cross-validation results for all models
+results <- resamples(list(
+  Bagging = bagged_cv,
+  RandomForest = rf_tuned
+))
+
+summary_results <- summary(results)
+
+
+```
+
+# Compare 3 Models
+```{r}
+# Box plot for comparing XGBoost, Bagging, RandomForest
+bwplot(results, metric = "ROC")
+```
+
+```{r}
+# Show the mean ROC for each model
+mean_roc <- summary_results$statistics$ROC[, "Mean"]
+print(mean_roc)
+```
+
+```{r}
+# Predicted Probability
+test_probabilities <- predict(rf_tuned_model, newdata = data_test, type = "prob")[, 2]
+
+threshold <- 0.5
+binary_predictions <- ifelse(test_probabilities >= threshold, 1, 0)
+
+submission_1 <- data.frame(PatientID = data_test$PatientID, Diagnosis = binary_predictions)
+write_csv(submission_1, "/Users/dingshuo/Desktop/submission_1.csv")
+
+```
+
+
+\newpage
+
+
+# References
+
+
+
+
+
+
